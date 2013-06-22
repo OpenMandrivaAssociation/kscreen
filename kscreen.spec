@@ -1,11 +1,11 @@
-Name:		kscreen
 Summary:	KDE Display Management software
-Version:	0.0.92
+Name:		kscreen
+Version:	1.0
 Release:	1
-Group:		Graphical desktop/KDE
 License:	GPLv2
-URL:		https://projects.kde.org/projects/playground/libs/kscreen
-Source0:	ftp://ftp.kde.org/pub/kde/unstable/%{name}/%{version}/src/%{name}-%{version}.tar.bz2
+Group:		Graphical desktop/KDE
+Url:		https://projects.kde.org/projects/playground/libs/kscreen
+Source0:	ftp://ftp.kde.org/pub/kde/stable/%{name}/%{version}/src/%{name}-%{version}.tar.bz2
 BuildRequires:	kdelibs4-devel
 BuildRequires:	pkgconfig(kscreen) = %{version}
 BuildRequires:	pkgconfig(QJson)
