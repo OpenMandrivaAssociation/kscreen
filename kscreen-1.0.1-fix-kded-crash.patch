@@ -1,0 +1,32 @@
+--- a/kded/generator.cpp
++++ b/kded/generator.cpp
+@@ -135,9 +135,9 @@
+ 
+     if (iteration == 1) {
+         kDebug() << "Cloning";
+-        KScreen::ModeList modes = embedded->modes();
++        KScreen::ModeList embeddedModes = embedded->modes();
+         QMap<QString, QSize> embeddedModeSize;
+-        Q_FOREACH(KScreen::Mode* mode, modes) {
++        Q_FOREACH(KScreen::Mode* mode, embeddedModes) {
+             embeddedModeSize.insert(mode->id(), mode->size());
+         }
+ 
+@@ -153,11 +153,11 @@
+ 
+         KScreen::ModeList embeddedCommon;
+         Q_FOREACH(const QString& key, embeddedKeys) {
+-            embeddedCommon.insert(key, modes[key]);
+-        }
+-
+-        KScreen::Mode* biggestEmbedded = biggestMode(embeddedCommon);
+-        KScreen::Mode* biggestExternal = biggestMode(externalCommon);
++            embeddedCommon.insert(key, embeddedModes[key]);
++        }
++
++        KScreen::Mode* biggestEmbedded = !embeddedCommon.empty() ? biggestMode(embeddedCommon) : biggestMode(embeddedModes);
++        KScreen::Mode* biggestExternal = !externalCommon.empty() ? biggestMode(externalCommon) : biggestMode(externalModes);
+ 
+         embedded->setEnabled(true);
+         embedded->setPos(QPoint(0,0));
+
