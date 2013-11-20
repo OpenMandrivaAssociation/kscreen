@@ -1,11 +1,11 @@
 Summary:	KDE Display Management software
 Name:		kscreen
-Version:	1.0.1
+Version:	1.0.2
 Release:	1
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
-Source0:	ftp://ftp.kde.org/pub/kde/stable/%{name}/%{version}/src/%{name}-%{version}.tar.bz2
+Source0:	ftp://ftp.kde.org/pub/kde/stable/%{name}/%{version}/src/%{name}-%{version}.tar.xz
 # From upstream
 # Fix crash of kded when two displays are connected which do not share a common resolution
 Patch0:		kscreen-1.0.1-fix-kded-crash.patch
