@@ -6,8 +6,10 @@ License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
 Source0:	ftp://ftp.kde.org/pub/kde/stable/%{name}/%{version}/src/%{name}-%{version}.tar.xz
+# From upstream
+Patch0:		kscreen-1.0.2-fix-typo.patch
 BuildRequires:	kdelibs4-devel
-BuildRequires:	pkgconfig(kscreen) = %{version}
+BuildRequires:	pkgconfig(kscreen)
 BuildRequires:	pkgconfig(QJson)
 Requires:	kdebase4-runtime
 Requires:	libkscreen
@@ -44,6 +46,7 @@ Plasma applet for quick display configuration.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %build
 %cmake_kde4
