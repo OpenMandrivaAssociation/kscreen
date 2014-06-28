@@ -1,0 +1,24 @@
+From: Lukáš Tinkl <lukas@kde.org>
+Date: Mon, 25 Nov 2013 15:07:29 +0000
+Subject: attempt to make the plasmoid at least somewhat useful...
+X-Git-Url: http://quickgit.kde.org/?p=kscreen.git&a=commitdiff&h=1d0df283fc7bd9c14d8322ce0075324c2cc1f55e
+---
+attempt to make the plasmoid at least somewhat useful...
+
+FIXED-IN: 1.0.3
+BUG: 328067
+---
+
+
+--- a/plasma/kscreenapplet.cpp
++++ b/plasma/kscreenapplet.cpp
+@@ -74,7 +74,7 @@
+     bool conn = connection.connect(QLatin1String("org.kde.kded"),
+                                    QLatin1String("/modules/kscreen"),
+                                    QLatin1String("org.kde.KScreen"),
+-                                   QLatin1String("unkownOutputConnected"),
++                                   QLatin1String("unknownOutputConnected"),
+                                    //QLatin1String("outputConnected"),
+                                    QLatin1String("s"),
+                                    this, SLOT(slotUnknownDisplayConnected(QString)));
+
