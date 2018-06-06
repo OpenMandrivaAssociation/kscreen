@@ -1,61 +1,58 @@
+%define stable %([ "`echo %{version} |cut -d. -f3`" -ge 80 ] && echo -n un; echo -n stable)
+
 Summary:	KDE Display Management software
 Name:		kscreen
-Version:	1.0.2.1
-Release:	9
+Version:	5.12.90
+Release:	1
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
-Source0:	ftp://ftp.kde.org/pub/kde/stable/%{name}/%{version}/src/%{name}-%{version}.tar.xz
-# From upstream
-Patch0:		kscreen-1.0.2-fix-typo.patch
-BuildRequires:	kdelibs4-devel
-BuildRequires:	pkgconfig(kscreen)
-BuildRequires:	pkgconfig(QJson)
-Requires:	kdebase4-runtime
-Requires:	libkscreen
+Source0:	http://download.kde.org/%{stable}/plasma/%{version}/kscreen-%{version}.tar.xz
+BuildRequires:	cmake(KF5Screen)
+BuildRequires:	cmake(KF5DBusAddons)
+BuildRequires:	cmake(KF5ConfigWidgets)
+BuildRequires:	cmake(KF5I18n)
+BuildRequires:	cmake(KF5XmlGui)
+BuildRequires:	cmake(KF5GlobalAccel)
+BuildRequires:	pkgconfig(kscreen2)
+BuildRequires:	pkgconfig(Qt5Core)
+BuildRequires:	pkgconfig(Qt5Gui)
+BuildRequires:	pkgconfig(Qt5Network)
+BuildRequires:	pkgconfig(Qt5Qml)
+BuildRequires:	pkgconfig(Qt5Quick)
+BuildRequires:	pkgconfig(Qt5QuickWidgets)
+BuildRequires:	pkgconfig(Qt5Test)
+BuildRequires:	pkgconfig(Qt5Widgets)
+BuildRequires:	pkgconfig(Qt5X11Extras)
+BuildRequires:	cmake(ECM)
+%rename kscreen5
 
 %description
 KCM and KDED modules for managing displays in KDE.
 
-%files -f %{name}.lang
-%{_kde_bindir}/kscreen-console
-%{_kde_libdir}/kde4/kcm_kscreen.so
-%{_kde_libdir}/kde4/kded_kscreen.so
-%{_kde_datadir}/apps/kcm_kscreen
-%{_kde_datadir}/kde4/services/kcm_kscreen.desktop
-%{_kde_datadir}/kde4/services/kded/kscreen.desktop
-%{_kde_iconsdir}/hicolor/*/actions/kdocumentinfo.*
-
-#------------------------------------------------------------------------------
-
-%package -n plasma-applet-kscreen
-Summary:	Plasma applet for quick display configuration
-Group:		Graphical desktop/KDE
-Requires:	%{name} = %{EVRD}
-
-%description -n plasma-applet-kscreen
-Plasma applet for quick display configuration.
-
-%files -n plasma-applet-kscreen -f plasma_applet_org.kde.plasma.kscreen.lang
-%{_kde_libdir}/kde4/plasma_applet_kscreen.so
-%{_kde_appsdir}/plasma/packages/org.kde.plasma.kscreen.qml
-%{_kde_services}/plasma-applet-kscreen.desktop
-%{_kde_services}/plasma-applet-kscreen-qml.desktop
+%files -f all.lang
+%{_bindir}/kscreen-console
+%{_libdir}/qt5/plugins/*.so
+%{_libdir}/qt5/plugins/kf5/kded/*.so
+%{_datadir}/icons/*/*/*
+%{_datadir}/kcm_kscreen
+%{_datadir}/kded_kscreen
+%{_datadir}/kservices5/*.desktop
+%{_sysconfdir}/xdg/kscreen.categories
 
 #------------------------------------------------------------------------------
 
 %prep
-%setup -q
-%patch0 -p1
+%setup -qn kscreen-%{version}
+%cmake_kde5
 
 %build
-%cmake_kde4
-%make
+%ninja -C build
 
 %install
-%makeinstall_std -C build
+%ninja_install -C build
 
-%find_lang %{name} kcm_displayconfiguration %{name}.lang
-
-%find_lang plasma_applet_org.kde.plasma.kscreen
-
+%find_lang kcm_displayconfiguration || touch kcm_displayconfiguration.lang
+%find_lang kscreen ||touch kscreen.lang
+%find_lang plasma_applet_org.kde.plasma.kscreen || touch plasma_applet_org.kde.plasma.kscreen.lang
+cat *.lang >all.lang
