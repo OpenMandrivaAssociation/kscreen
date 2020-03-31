@@ -2,12 +2,12 @@
 
 Summary:	KDE Display Management software
 Name:		kscreen
-Version:	5.18.3
-Release:	2
+Version:	5.18.4.1
+Release:	1
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
-Source0:	http://download.kde.org/%{stable}/plasma/%{version}/kscreen-%{version}.tar.xz
+Source0:	http://download.kde.org/%{stable}/plasma/%(echo %{version} |cut -d. -f1-3)/kscreen-%{version}.tar.xz
 BuildRequires:	cmake(KF5Declarative)
 BuildRequires:	cmake(KF5IconThemes)
 BuildRequires:	cmake(KF5Plasma)
@@ -51,7 +51,7 @@ KCM and KDED modules for managing displays in KDE.
 #------------------------------------------------------------------------------
 
 %prep
-%setup -qn kscreen-%{version}
+%autosetup -p1
 %cmake_kde5
 
 %build
