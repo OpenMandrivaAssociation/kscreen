@@ -30,6 +30,8 @@ BuildRequires:	pkgconfig(Qt5QuickWidgets)
 BuildRequires:	pkgconfig(Qt5Test)
 BuildRequires:	pkgconfig(Qt5Widgets)
 BuildRequires:	pkgconfig(Qt5X11Extras)
+BuildRequires:	pkgconfig(xcb-atom)
+BuildRequires:	pkgconfig(xi)
 BuildRequires:	cmake(ECM)
 %rename kscreen5
 
