@@ -2,7 +2,7 @@
 
 Summary:	KDE Display Management software
 Name:		kscreen
-Version:	5.26.5
+Version:	5.27.0
 Release:	1
 License:	GPLv2+
 Group:		Graphical desktop/KDE
@@ -42,7 +42,6 @@ KCM and KDED modules for managing displays in KDE.
 %files -f kscreen.lang
 %{_bindir}/kscreen-console
 %{_libdir}/qt5/plugins/kf5/kded/*.so
-%{_datadir}/kded_kscreen
 %{_datadir}/kpackage/kcms/kcm_kscreen
 %{_datadir}/kservices5/*.desktop
 %{_datadir}/qlogging-categories5/kscreen.categories
