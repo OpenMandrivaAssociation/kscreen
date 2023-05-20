@@ -2,7 +2,7 @@
 %define git 20230520
 
 Summary:	KDE Display Management software
-Name:		kscreen
+Name:		plasma6-kscreen
 Version:	5.240.0
 Release:	%{?git:0.%{git}.}1
 License:	GPLv2+
