@@ -1,5 +1,5 @@
 %define stable %([ "`echo %{version} |cut -d. -f3`" -ge 80 ] && echo -n un; echo -n stable)
-%define git 20230606
+%define git 20230609
 
 Summary:	KDE Display Management software
 Name:		plasma6-kscreen
@@ -45,7 +45,6 @@ KCM and KDED modules for managing displays in KDE.
 %files -f kscreen.lang
 %{_bindir}/kscreen-console
 %{_qtdir}/plugins/kf6/kded/*.so
-%{_datadir}/kpackage/kcms/kcm_kscreen
 %{_datadir}/qlogging-categories6/kscreen.categories
 %{_datadir}/metainfo/org.kde.kscreen.appdata.xml
 %{_datadir}/plasma/plasmoids/org.kde.kscreen
