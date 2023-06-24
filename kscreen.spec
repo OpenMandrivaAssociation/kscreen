@@ -20,8 +20,8 @@ BuildRequires:	cmake(KF5XmlGui)
 BuildRequires:	cmake(KF5GlobalAccel)
 BuildRequires:	cmake(KF5KCMUtils)
 BuildRequires:	cmake(Qt5Sensors)
-BuildRequires:	cmake(LayerShellQt) < 5.50
-BuildRequires:	pkgconfig(kscreen2) < 5.50
+BuildRequires:	cmake(LayerShellQt) < 5.27.80
+BuildRequires:	pkgconfig(kscreen2) < 5.27.80
 BuildRequires:	pkgconfig(Qt5Core)
 BuildRequires:	pkgconfig(Qt5Gui)
 BuildRequires:	pkgconfig(Qt5Network)
