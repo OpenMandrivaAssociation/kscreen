@@ -38,6 +38,8 @@ BuildRequires:	cmake(Qt6Widgets)
 BuildRequires:	pkgconfig(xcb-atom)
 BuildRequires:	pkgconfig(xi)
 BuildRequires:	cmake(ECM)
+# Not 5
+BuildRequires:	plasma6-xdg-desktop-portal-kde
 
 %description
 KCM and KDED modules for managing displays in KDE.
