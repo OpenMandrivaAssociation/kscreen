@@ -4,7 +4,7 @@
 Summary:	KDE Display Management software
 Name:		plasma6-kscreen
 Version:	5.27.80
-Release:	%{?git:0.%{git}.}1
+Release:	%{?git:0.%{git}.}2
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
