@@ -3,8 +3,8 @@
 
 Summary:	KDE Display Management software
 Name:		plasma6-kscreen
-Version:	5.27.80
-Release:	%{?git:0.%{git}.}2
+Version:	5.90.0
+Release:	%{?git:0.%{git}.}1
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
@@ -15,8 +15,8 @@ Source0:	http://download.kde.org/%{stable}/plasma/%(echo %{version} |cut -d. -f1
 %endif
 BuildRequires:	cmake(KF6Declarative)
 BuildRequires:	cmake(KF6IconThemes)
-BuildRequires:	cmake(KF6Plasma)
-BuildRequires:	cmake(KF6PlasmaQuick)
+BuildRequires:	cmake(Plasma) >= 5.90.0
+BuildRequires:	cmake(PlasmaQuick) >= 5.90.0
 BuildRequires:	cmake(KF6Screen)
 BuildRequires:	cmake(KF6DBusAddons)
 BuildRequires:	cmake(KF6ConfigWidgets)
