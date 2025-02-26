@@ -40,6 +40,7 @@ BuildRequires:	cmake(Qt6Test)
 BuildRequires:	cmake(Qt6Widgets)
 BuildRequires:	pkgconfig(xcb-atom)
 BuildRequires:	pkgconfig(xi)
+BuildRequires:	pkgconfig(xkbcommon)
 BuildRequires:	cmake(ECM)
 
 %description
