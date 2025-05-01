@@ -4,9 +4,9 @@
 %define gitbranchd %(echo %{gitbranch} |sed -e "s,/,-,g")
 
 Summary:	KDE Display Management software
-Name:		plasma6-kscreen
+Name:		kscreen
 Version:	6.3.4
-Release:	%{?git:0.%{git}.}2
+Release:	%{?git:0.%{git}.}3
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
@@ -42,11 +42,16 @@ BuildRequires:	pkgconfig(xcb-atom)
 BuildRequires:	pkgconfig(xi)
 BuildRequires:	pkgconfig(xkbcommon)
 BuildRequires:	cmake(ECM)
+BuildSystem:	cmake
+BuildOption:	-DBUILD_QCH:BOOL=ON
+BuildOption:	-DKDE_INSTALL_USE_QT_SYS_PATHS:BOOL=ON
+# Renamed 2025-05-01 after 6.0
+%rename plasma6-kscreen
 
 %description
 KCM and KDED modules for managing displays in KDE.
 
-%files -f kscreen.lang
+%files -f %{name}.lang
 %{_bindir}/kscreen-console
 %{_qtdir}/plugins/kf6/kded/*.so
 %{_datadir}/qlogging-categories6/kscreen.categories
@@ -59,21 +64,3 @@ KCM and KDED modules for managing displays in KDE.
 %{_datadir}/dbus-1/services/org.kde.kscreen.osdService.service
 %{_qtdir}/plugins/plasma/applets/org.kde.kscreen.so
 %{_datadir}/kglobalaccel/org.kde.kscreen.desktop
-
-#------------------------------------------------------------------------------
-
-%prep
-%autosetup -p1 -n kscreen-%{?git:%{gitbranchd}}%{!?git:%{version}}
-%cmake \
-	-DBUILD_QCH:BOOL=ON \
-	-DBUILD_WITH_QT6:BOOL=ON \
-	-DKDE_INSTALL_USE_QT_SYS_PATHS:BOOL=ON \
-	-G Ninja
-
-%build
-%ninja_build -C build
-
-%install
-%ninja_install -C build
-
-%find_lang kscreen --all-name --with-html
