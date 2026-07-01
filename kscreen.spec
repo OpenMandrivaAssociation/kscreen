@@ -28,6 +28,7 @@ BuildRequires:	cmake(KF6GlobalAccel)
 BuildRequires:	cmake(KF6KCMUtils)
 BuildRequires:	cmake(KF6Svg)
 BuildRequires:	cmake(KF6Crash)
+BuildRequires:	cmake(KF6ItemModels)
 BuildRequires:	cmake(Qt6Sensors)
 BuildRequires:	cmake(LayerShellQt)
 BuildRequires:	cmake(Qt6)
@@ -47,6 +48,8 @@ BuildRequires:	pkgconfig(xcb-atom)
 BuildRequires:	pkgconfig(xi)
 BuildRequires:	pkgconfig(xkbcommon)
 BuildRequires:	cmake(ECM)
+BuildRequires:	qml(org.kde.kitemmodels)
+BuildRequires:	qml(org.kde.plasma.plasma5support)
 BuildSystem:	cmake
 BuildOption:	-DBUILD_QCH:BOOL=ON
 BuildOption:	-DKDE_INSTALL_USE_QT_SYS_PATHS:BOOL=ON
