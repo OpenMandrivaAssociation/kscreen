@@ -61,7 +61,9 @@ KCM and KDED modules for managing displays in KDE.
 
 %files -f %{name}.lang
 %{_bindir}/kscreen-console
-%{_qtdir}/plugins/kf6/kded/*.so
+%{_bindir}/kscreenctl
+%{_datadir}/fish/vendor_completions.d/kscreenctl.fish
+%{_datadir}/zsh/site-functions/_kscreenctl
 %{_datadir}/qlogging-categories6/kscreen.categories
 %{_prefix}/lib/systemd/user/plasma-kscreen-osd.service
 %{_libdir}/libexec/kscreen_osd_service
