@@ -1,0 +1,968 @@
+diff -ruN a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt	2026-10-08 13:18:39.000000000 +0200
++++ b/CMakeLists.txt	2026-10-19 21:33:41.422884430 +0200
+@@ -89,6 +89,7 @@
+ add_subdirectory(console)
+ add_subdirectory(hdrcalibrator)
+ add_subdirectory(kscreenctl)
++add_subdirectory(x11hotplug)
+ 
+ # add clang-format target for all our real source files
+ file(GLOB_RECURSE ALL_CLANG_FORMAT_SOURCE_FILES *.cpp *.h)
+diff -ruN a/x11hotplug/CMakeLists.txt b/x11hotplug/CMakeLists.txt
+--- a/x11hotplug/CMakeLists.txt	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/CMakeLists.txt	2026-10-19 21:44:29.041786120 +0200
+@@ -0,0 +1,29 @@
++# X11-only helper. KWin owns output configuration on Wayland; kwin_x11 does not
++# apply saved layouts, so this process does that job for the X11 session.
++
++find_package(Qt6 REQUIRED COMPONENTS DBus Gui)
++find_package(X11 REQUIRED)
++if(NOT X11_Xi_FOUND)
++    message(FATAL_ERROR "libXi is required to map X11 touchscreens onto outputs")
++endif()
++
++add_executable(kscreen_x11_hotplug
++    main.cpp
++    manager.cpp
++    manager.h
++    touch.cpp
++    touch.h
++)
++
++target_link_libraries(kscreen_x11_hotplug PRIVATE
++    KF6::Screen
++    Qt::DBus
++    Qt::Gui
++    X11::X11
++    X11::Xi
++)
++
++install(TARGETS kscreen_x11_hotplug DESTINATION ${KDE_INSTALL_LIBEXECDIR})
++
++configure_file(plasma-kscreen-x11.service.in plasma-kscreen-x11.service @ONLY)
++install(FILES ${CMAKE_CURRENT_BINARY_DIR}/plasma-kscreen-x11.service DESTINATION ${KDE_INSTALL_SYSTEMDUSERUNITDIR})
+diff -ruN a/x11hotplug/main.cpp b/x11hotplug/main.cpp
+--- a/x11hotplug/main.cpp	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/main.cpp	2026-10-19 21:31:46.325510561 +0200
+@@ -0,0 +1,25 @@
++/*
++    SPDX-FileCopyrightText: 2026 OpenMandriva
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#include "manager.h"
++
++#include <QGuiApplication>
++
++int main(int argc, char **argv)
++{
++    QGuiApplication app(argc, argv);
++    QCoreApplication::setApplicationName(QStringLiteral("kscreen_x11_hotplug"));
++
++    // Wayland sessions keep output management inside KWin. Starting this
++    // helper there would apply a second configuration through Xwayland.
++    if (app.platformName() != QLatin1String("xcb")) {
++        return 0;
++    }
++
++    Manager manager;
++    manager.start();
++    return app.exec();
++}
+diff -ruN a/x11hotplug/manager.cpp b/x11hotplug/manager.cpp
+--- a/x11hotplug/manager.cpp	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/manager.cpp	2026-10-19 21:44:54.067029841 +0200
+@@ -0,0 +1,587 @@
++/*
++    SPDX-FileCopyrightText: 2012 Alejandro Fiestas Olivares <afiestas@kde.org>
++    SPDX-FileCopyrightText: 2018 Kai Uwe Broulik <kde@broulik.de>
++    SPDX-FileCopyrightText: 2026 OpenMandriva
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#include "manager.h"
++#include "touch.h"
++
++#include <kscreen/config.h>
++#include <kscreen/configmonitor.h>
++#include <kscreen/edid.h>
++#include <kscreen/getconfigoperation.h>
++#include <kscreen/mode.h>
++#include <kscreen/output.h>
++#include <kscreen/setconfigoperation.h>
++
++#include <QDBusConnection>
++#include <QDBusInterface>
++#include <QDBusMessage>
++#include <QDBusReply>
++#include <QCryptographicHash>
++#include <QDBusVariant>
++#include <QDir>
++#include <QFile>
++#include <QJsonDocument>
++#include <QList>
++#include <QLoggingCategory>
++#include <QPoint>
++#include <QRect>
++#include <QSize>
++#include <QStandardPaths>
++#include <QStringList>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++
++Q_LOGGING_CATEGORY(KSCREEN_X11, "kscreen.x11")
++
++namespace
++{
++bool dbusBool(const QVariant &value)
++{
++    if (value.metaType() == QMetaType::fromType<QDBusVariant>()) {
++        return value.value<QDBusVariant>().variant().toBool();
++    }
++    return value.toBool();
++}
++
++QString hashOf(const KScreen::ConfigPtr &config)
++{
++    QStringList hashes;
++    const auto outputs = config->connectedOutputs();
++    hashes.reserve(outputs.count());
++    for (const auto &output : outputs) {
++        hashes << output->hash();
++    }
++    std::sort(hashes.begin(), hashes.end());
++    const QByteArray digest = QCryptographicHash::hash(hashes.join(QString()).toLatin1(), QCryptographicHash::Md5);
++    return QString::fromLatin1(digest.toHex());
++}
++
++KScreen::ModePtr bestMode(const KScreen::OutputPtr &output)
++{
++    if (const auto preferred = output->preferredMode()) {
++        return preferred;
++    }
++    KScreen::ModePtr best;
++    for (const auto &mode : output->modes()) {
++        if (!best || mode->size().width() * mode->size().height() > best->size().width() * best->size().height()
++            || (mode->size() == best->size() && mode->refreshRate() > best->refreshRate())) {
++            best = mode;
++        }
++    }
++    return best;
++}
++
++QVariantMap metadataFor(const KScreen::OutputPtr &output)
++{
++    QVariantMap metadata;
++    metadata.insert(QStringLiteral("name"), output->name());
++    if (output->edid() && output->edid()->isValid()) {
++        metadata.insert(QStringLiteral("fullname"), output->edid()->deviceId());
++    }
++    return metadata;
++}
++}
++
++Manager::Manager(QObject *parent)
++    : QObject(parent)
++{
++    m_timer.setInterval(100);
++    m_timer.setSingleShot(true);
++    connect(&m_timer, &QTimer::timeout, this, &Manager::reconcile);
++}
++
++QString Manager::dataDir() const
++{
++    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/kscreen/");
++}
++
++QString Manager::connectedHash() const
++{
++    return m_config ? hashOf(m_config) : QString();
++}
++
++void Manager::start()
++{
++    QDBusInterface upower(QStringLiteral("org.freedesktop.UPower"),
++                          QStringLiteral("/org/freedesktop/UPower"),
++                          QStringLiteral("org.freedesktop.DBus.Properties"),
++                          QDBusConnection::systemBus());
++    const QDBusReply<QVariant> lid = upower.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower"), QStringLiteral("LidIsClosed"));
++    if (lid.isValid()) {
++        m_lidClosed = dbusBool(lid.value());
++    }
++    QDBusConnection::systemBus().connect(QStringLiteral("org.freedesktop.UPower"),
++                                         QStringLiteral("/org/freedesktop/UPower"),
++                                         QStringLiteral("org.freedesktop.DBus.Properties"),
++                                         QStringLiteral("PropertiesChanged"),
++                                         this,
++                                         SLOT(upowerPropertiesChanged(QString,QVariantMap,QStringList)));
++    QDBusConnection::sessionBus().connect(QStringLiteral("org.kde.Solid.PowerManagement"),
++                                          QStringLiteral("/org/kde/Solid/PowerManagement/Actions/SuspendSession"),
++                                          QStringLiteral("org.kde.Solid.PowerManagement.Actions.SuspendSession"),
++                                          QStringLiteral("resumingFromSuspend"),
++                                          this,
++                                          SLOT(resumed()));
++    requestConfig(0);
++}
++
++void Manager::requestConfig(int attempt)
++{
++    m_attempts = attempt;
++    connect(new KScreen::GetConfigOperation, &KScreen::GetConfigOperation::finished, this, [this](KScreen::ConfigOperation *op) {
++        if (op->hasError()) {
++            qCWarning(KSCREEN_X11) << "Failed to read the X11 output configuration:" << op->errorString();
++            if (m_attempts < 10) {
++                QTimer::singleShot(500, this, [this] {
++                    requestConfig(m_attempts + 1);
++                });
++            }
++            return;
++        }
++        adoptConfig(op->config());
++    });
++}
++
++void Manager::adoptConfig(const KScreen::ConfigPtr &config)
++{
++    if (!config) {
++        qCWarning(KSCREEN_X11) << "X11 output configuration is empty";
++        return;
++    }
++    m_config = config;
++    connect(KScreen::ConfigMonitor::instance(), &KScreen::ConfigMonitor::configurationChanged, this, [this] {
++        m_timer.start();
++    });
++    connect(m_config.data(), &KScreen::Config::outputAdded, this, [this](const KScreen::OutputPtr &) {
++        m_timer.start();
++    });
++    KScreen::ConfigMonitor::instance()->addConfig(m_config);
++    if (!m_timer.isActive()) {
++        m_timer.start();
++    }
++}
++
++void Manager::upowerPropertiesChanged(const QString &interface, const QVariantMap &changed, const QStringList &)
++{
++    if (interface != QLatin1String("org.freedesktop.UPower") || !changed.contains(QStringLiteral("LidIsClosed"))) {
++        return;
++    }
++    const bool closed = dbusBool(changed.value(QStringLiteral("LidIsClosed")));
++    if (closed == m_lidClosed) {
++        return;
++    }
++    m_lidClosed = closed;
++    if (!closed) {
++        // The open-lid layout is the one stored for this set of outputs.
++        m_lidHoldsPanelOff = false;
++        m_appliedHash.clear();
++    }
++    m_timer.start();
++}
++
++void Manager::resumed()
++{
++    // Force the XRandR backend to query the server. The result is discarded;
++    // a real change arrives through ConfigMonitor.
++    new KScreen::GetConfigOperation(KScreen::ConfigOperation::NoEDID);
++}
++
++void Manager::reconcile()
++{
++    if (!m_config || m_applying) {
++        if (m_applying) {
++            m_timer.start();
++        }
++        return;
++    }
++    const QString hash = connectedHash();
++    if (hash.isEmpty()) {
++        return;
++    }
++    if (hash != m_appliedHash) {
++        m_appliedHash = hash;
++        applyArrangement();
++        return;
++    }
++    // Closing the lid does not change which outputs are connected, so the
++    // saved layout would just turn the panel back on. Hold it off instead,
++    // and do not overwrite that layout.
++    if (m_lidClosed && !m_lidHoldsPanelOff) {
++        disablePanelIfExternal();
++        if (m_lidHoldsPanelOff) {
++            submit(false);
++            return;
++        }
++    }
++    if (!m_lidHoldsPanelOff) {
++        save();
++    }
++    alignX11TouchScreen(m_config);
++}
++
++void Manager::applyArrangement()
++{
++    const bool known = applySaved(m_appliedHash);
++    if (!known) {
++        applyIdeal();
++    }
++    if (m_lidClosed) {
++        disablePanelIfExternal();
++    }
++    const bool showOsd = !known && !m_initial && !m_lidHoldsPanelOff && m_config->connectedOutputs().count() > 1;
++    submit(showOsd);
++}
++
++bool Manager::applySaved(const QString &hash)
++{
++    QFile file(dataDir() + hash);
++    if (!file.open(QIODevice::ReadOnly)) {
++        return false;
++    }
++    const QVariantList entries = QJsonDocument::fromJson(file.readAll()).toVariant().toList();
++    if (entries.isEmpty()) {
++        return false;
++    }
++
++    QStringList seen;
++    QStringList duplicates;
++    const auto connected = m_config->connectedOutputs();
++    for (const auto &output : connected) {
++        const QString id = output->hash();
++        if (seen.contains(id) && !duplicates.contains(id)) {
++            duplicates << id;
++        }
++        seen << id;
++    }
++
++    bool matched = false;
++    const auto outputs = m_config->outputs();
++    for (const auto &output : outputs) {
++        if (!output->isConnected()) {
++            output->setEnabled(false);
++            continue;
++        }
++        const QString id = output->hash();
++        QVariantMap info;
++        for (const auto &entry : entries) {
++            const QVariantMap candidate = entry.toMap();
++            if (candidate.value(QStringLiteral("id")).toString() != id) {
++                continue;
++            }
++            if (duplicates.contains(id)) {
++                const QString name = candidate.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("name")).toString();
++                if (name != output->name()) {
++                    continue;
++                }
++            }
++            info = candidate;
++            break;
++        }
++        if (info.isEmpty()) {
++            output->setEnabled(true);
++            if (const auto mode = bestMode(output)) {
++                output->setCurrentModeId(mode->id());
++            }
++            output->setExplicitLogicalSize(m_config->logicalSizeForOutput(*output));
++            continue;
++        }
++        matched = true;
++        output->setEnabled(info.value(QStringLiteral("enabled")).toBool());
++        const QVariantMap pos = info.value(QStringLiteral("pos")).toMap();
++        output->setPos(QPoint(pos.value(QStringLiteral("x")).toInt(), pos.value(QStringLiteral("y")).toInt()));
++        uint32_t priority = 0;
++        if (info.contains(QStringLiteral("priority"))) {
++            priority = info.value(QStringLiteral("priority")).toUInt();
++        } else if (info.contains(QStringLiteral("primary"))) {
++            priority = info.value(QStringLiteral("primary")).toBool() ? 1 : 2;
++        }
++        if (priority > 0) {
++            output->setPriority(priority);
++        }
++        applyModeFields(output, info);
++        const QVariantMap global = readGlobal(output);
++        if (!global.isEmpty()) {
++            applyModeFields(output, global);
++        }
++        output->setExplicitLogicalSize(m_config->logicalSizeForOutput(*output));
++    }
++    if (matched) {
++        m_config->adjustPriorities();
++    }
++    return matched;
++}
++
++QVariantMap Manager::readGlobal(const KScreen::OutputPtr &output) const
++{
++    const QString base = QStringLiteral("kscreen/outputs/") + output->hashMd5();
++    QString path = QStandardPaths::locate(QStandardPaths::GenericDataLocation, base + output->name());
++    if (path.isEmpty()) {
++        path = QStandardPaths::locate(QStandardPaths::GenericDataLocation, base);
++    }
++    if (path.isEmpty()) {
++        return {};
++    }
++    QFile file(path);
++    if (!file.open(QIODevice::ReadOnly)) {
++        return {};
++    }
++    return QJsonDocument::fromJson(file.readAll()).toVariant().toMap();
++}
++
++void Manager::applyModeFields(const KScreen::OutputPtr &output, const QVariantMap &info)
++{
++    if (info.contains(QStringLiteral("rotation"))) {
++        output->setRotation(static_cast<KScreen::Output::Rotation>(info.value(QStringLiteral("rotation")).toInt()));
++    }
++    if (info.contains(QStringLiteral("scale"))) {
++        const double scale = info.value(QStringLiteral("scale")).toDouble();
++        if (scale > 0) {
++            output->setScale(scale);
++        }
++    }
++    if (info.contains(QStringLiteral("vrrpolicy"))) {
++        output->setVrrPolicy(static_cast<KScreen::Output::VrrPolicy>(info.value(QStringLiteral("vrrpolicy")).toUInt()));
++    }
++    if (info.contains(QStringLiteral("overscan"))) {
++        output->setOverscan(info.value(QStringLiteral("overscan")).toUInt());
++    }
++    if (info.contains(QStringLiteral("rgbrange"))) {
++        output->setRgbRange(static_cast<KScreen::Output::RgbRange>(info.value(QStringLiteral("rgbrange")).toUInt()));
++    }
++
++    const QVariantMap modeInfo = info.value(QStringLiteral("mode")).toMap();
++    const QVariantMap sizeMap = modeInfo.value(QStringLiteral("size")).toMap();
++    const QSize size(sizeMap.value(QStringLiteral("width")).toInt(), sizeMap.value(QStringLiteral("height")).toInt());
++    const float refresh = modeInfo.value(QStringLiteral("refresh")).toFloat();
++    if (!size.isValid()) {
++        return;
++    }
++    for (const auto &mode : output->modes()) {
++        if (mode->size() == size && std::abs(mode->refreshRate() - refresh) < 0.01f) {
++            output->setCurrentModeId(mode->id());
++            break;
++        }
++    }
++}
++
++void Manager::applyIdeal()
++{
++    QList<KScreen::OutputPtr> ordered;
++    const auto outputs = m_config->outputs();
++    for (const auto &output : outputs) {
++        if (!output->isConnected() || output->modes().isEmpty()) {
++            output->setEnabled(false);
++            continue;
++        }
++        ordered.append(output);
++    }
++    std::stable_sort(ordered.begin(), ordered.end(), [](const KScreen::OutputPtr &left, const KScreen::OutputPtr &right) {
++        return left->type() == KScreen::Output::Panel && right->type() != KScreen::Output::Panel;
++    });
++
++    int x = 0;
++    uint32_t priority = 1;
++    for (const auto &output : ordered) {
++        output->setEnabled(true);
++        if (const auto mode = bestMode(output)) {
++            output->setCurrentModeId(mode->id());
++        }
++        output->setExplicitLogicalSize(m_config->logicalSizeForOutput(*output));
++        output->setPos(QPoint(x, 0));
++        const int width = m_config->logicalSizeForOutputInt(*output).width();
++        x += std::max(1, width);
++        output->setPriority(priority);
++        ++priority;
++    }
++    m_config->adjustPriorities();
++    qCInfo(KSCREEN_X11) << "No saved layout for this set of outputs; extending them from left to right";
++}
++
++void Manager::disablePanelIfExternal()
++{
++    int external = 0;
++    KScreen::OutputPtr panel;
++    const auto outputs = m_config->connectedOutputs();
++    for (const auto &output : outputs) {
++        if (output->type() == KScreen::Output::Panel) {
++            if (!panel) {
++                panel = output;
++            }
++        } else {
++            ++external;
++        }
++    }
++    if (external == 0 || !panel) {
++        m_lidHoldsPanelOff = false;
++        return;
++    }
++
++    // The XRandR backend sizes the screen from the bounding box and then
++    // rejects any output whose right edge passes that width. A panel at the
++    // origin with an external monitor to its right would fail that test once
++    // the panel is disabled, so move those monitors left first. This matches
++    // the 6.7 KDED and is not written back over the open-lid layout.
++    if (panel->isEnabled()) {
++        const QRect geom = panel->geometry();
++        for (const auto &other : outputs) {
++            if (other == panel || !other->isEnabled()) {
++                continue;
++            }
++            QPoint otherPos = other->pos();
++            if (geom.isValid() && otherPos.x() >= geom.right() && otherPos.y() >= geom.top() && otherPos.y() <= geom.bottom()) {
++                otherPos.setX(otherPos.x() - geom.width());
++                other->setPos(otherPos);
++            }
++        }
++    }
++
++    m_lidHoldsPanelOff = true;
++    for (const auto &output : outputs) {
++        if (output->type() == KScreen::Output::Panel) {
++            output->setEnabled(false);
++        }
++    }
++    m_config->adjustPriorities();
++}
++
++void Manager::pinToOrigin()
++{
++    int minX = 0;
++    int minY = 0;
++    bool any = false;
++    const auto outputs = m_config->outputs();
++    for (const auto &output : outputs) {
++        if (!output->isConnected() || !output->isEnabled()) {
++            continue;
++        }
++        const QRect geom = output->geometry();
++        if (!geom.isValid()) {
++            continue;
++        }
++        if (!any) {
++            minX = geom.x();
++            minY = geom.y();
++            any = true;
++        } else {
++            minX = std::min(minX, geom.x());
++            minY = std::min(minY, geom.y());
++        }
++    }
++    if (!any || (minX == 0 && minY == 0)) {
++        return;
++    }
++    const QPoint shift(minX, minY);
++    for (const auto &output : outputs) {
++        if (!output->isConnected() || !output->isEnabled()) {
++            continue;
++        }
++        output->setPos(output->pos() - shift);
++    }
++}
++
++void Manager::submit(bool showOsd)
++{
++    m_applying = true;
++    pinToOrigin();
++    connect(new KScreen::SetConfigOperation(m_config), &KScreen::SetConfigOperation::finished, this, [this, showOsd](KScreen::ConfigOperation *op) {
++        m_applying = false;
++        m_initial = false;
++        if (op->hasError()) {
++            qCWarning(KSCREEN_X11) << "Failed to apply the X11 output configuration:" << op->errorString();
++        } else if (!m_lidHoldsPanelOff) {
++            save();
++        }
++        alignX11TouchScreen(m_config);
++        if (showOsd && !op->hasError()) {
++            QDBusMessage message = QDBusMessage::createMethodCall(QStringLiteral("org.kde.kscreen.osdService"),
++                                                                  QStringLiteral("/org/kde/kscreen/osdService"),
++                                                                  QStringLiteral("org.kde.kscreen.osdService"),
++                                                                  QStringLiteral("showActionSelector"));
++            QDBusConnection::sessionBus().asyncCall(message);
++        }
++    });
++}
++
++void Manager::save() const
++{
++    if (!m_config) {
++        return;
++    }
++    const QString hash = hashOf(m_config);
++    if (hash.isEmpty() || !QDir().mkpath(dataDir())) {
++        return;
++    }
++
++    const auto outputs = m_config->outputs();
++    const auto duplicated = [&outputs](const KScreen::OutputPtr &output) {
++        return std::any_of(outputs.cbegin(), outputs.cend(), [&output](const KScreen::OutputPtr &other) {
++            return other != output && other->isConnected() && other->hashMd5() == output->hashMd5();
++        });
++    };
++
++    QVariantList stored;
++    for (const auto &output : outputs) {
++        if (!output->isConnected() || !output->currentMode()) {
++            continue;
++        }
++        QVariantMap info;
++        info.insert(QStringLiteral("id"), output->hash());
++        info.insert(QStringLiteral("metadata"), metadataFor(output));
++        info.insert(QStringLiteral("rotation"), int(output->rotation()));
++        info.insert(QStringLiteral("scale"), int(output->scale() * 10000 + 0.5) / 10000.0);
++        QVariantMap modeSize;
++        modeSize.insert(QStringLiteral("width"), output->currentMode()->size().width());
++        modeSize.insert(QStringLiteral("height"), output->currentMode()->size().height());
++        QVariantMap mode;
++        mode.insert(QStringLiteral("refresh"), output->currentMode()->refreshRate());
++        mode.insert(QStringLiteral("size"), modeSize);
++        info.insert(QStringLiteral("mode"), mode);
++        info.insert(QStringLiteral("vrrpolicy"), static_cast<uint32_t>(output->vrrPolicy()));
++        info.insert(QStringLiteral("overscan"), output->overscan());
++        info.insert(QStringLiteral("rgbrange"), static_cast<uint32_t>(output->rgbRange()));
++        info.insert(QStringLiteral("priority"), output->priority());
++        info.insert(QStringLiteral("enabled"), output->isEnabled());
++        QVariantMap pos;
++        pos.insert(QStringLiteral("x"), output->pos().x());
++        pos.insert(QStringLiteral("y"), output->pos().y());
++        info.insert(QStringLiteral("pos"), pos);
++        stored.append(info);
++
++        if (!output->isEnabled()) {
++            continue;
++        }
++        const QString globalDir = dataDir() + QStringLiteral("outputs/");
++        if (!QDir().mkpath(globalDir)) {
++            continue;
++        }
++        QString globalPath = globalDir + output->hashMd5() + output->name();
++        if (!duplicated(output) && !QFile::exists(globalPath)) {
++            globalPath = globalDir + output->hashMd5();
++        }
++        QFile global(globalPath);
++        if (global.open(QIODevice::WriteOnly)) {
++            QVariantMap globalInfo = info;
++            globalInfo.remove(QStringLiteral("priority"));
++            globalInfo.remove(QStringLiteral("enabled"));
++            globalInfo.remove(QStringLiteral("pos"));
++            global.write(QJsonDocument::fromVariant(globalInfo).toJson());
++        }
++    }
++
++    QFile file(dataDir() + hash);
++    if (!file.open(QIODevice::WriteOnly)) {
++        qCWarning(KSCREEN_X11) << "Could not write" << file.fileName() << file.errorString();
++        return;
++    }
++    file.write(QJsonDocument::fromVariant(stored).toJson());
++    qCDebug(KSCREEN_X11) << "Saved X11 output layout to" << file.fileName();
++}
++
++#include "moc_manager.cpp"
+diff -ruN a/x11hotplug/manager.h b/x11hotplug/manager.h
+--- a/x11hotplug/manager.h	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/manager.h	2026-10-19 21:44:29.041786120 +0200
+@@ -0,0 +1,54 @@
++/*
++    SPDX-FileCopyrightText: 2012 Alejandro Fiestas Olivares <afiestas@kde.org>
++    SPDX-FileCopyrightText: 2026 OpenMandriva
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include <QObject>
++#include <QString>
++#include <QTimer>
++#include <QVariantMap>
++
++#include <kscreen/types.h>
++
++class QDBusMessage;
++
++class Manager : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit Manager(QObject *parent = nullptr);
++    void start();
++
++private Q_SLOTS:
++    void reconcile();
++    void upowerPropertiesChanged(const QString &interface, const QVariantMap &changed, const QStringList &invalidated);
++    void resumed();
++
++private:
++    void requestConfig(int attempt);
++    void adoptConfig(const KScreen::ConfigPtr &config);
++    void applyArrangement();
++    bool applySaved(const QString &hash);
++    void applyIdeal();
++    void applyModeFields(const KScreen::OutputPtr &output, const QVariantMap &info);
++    QVariantMap readGlobal(const KScreen::OutputPtr &output) const;
++    void submit(bool showOsd);
++    void save() const;
++    void disablePanelIfExternal();
++    void pinToOrigin();
++    QString connectedHash() const;
++    QString dataDir() const;
++
++    KScreen::ConfigPtr m_config;
++    QTimer m_timer;
++    QString m_appliedHash;
++    bool m_applying = false;
++    bool m_initial = true;
++    bool m_lidClosed = false;
++    bool m_lidHoldsPanelOff = false;
++    int m_attempts = 0;
++};
+diff -ruN a/x11hotplug/plasma-kscreen-x11.service.in b/x11hotplug/plasma-kscreen-x11.service.in
+--- a/x11hotplug/plasma-kscreen-x11.service.in	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/plasma-kscreen-x11.service.in	2026-10-19 21:31:46.325510561 +0200
+@@ -0,0 +1,10 @@
++[Unit]
++Description=KScreen X11 hotplug and touchscreen mapping
++PartOf=plasma-workspace-x11.target
++After=plasma-kwin_x11.service
++
++[Service]
++ExecStart=@KDE_INSTALL_FULL_LIBEXECDIR@/kscreen_x11_hotplug
++Restart=on-failure
++RestartSec=2s
++Slice=session.slice
+diff -ruN a/x11hotplug/touch.cpp b/x11hotplug/touch.cpp
+--- a/x11hotplug/touch.cpp	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/touch.cpp	2026-10-19 21:45:44.092207605 +0200
+@@ -0,0 +1,210 @@
++/*
++    SPDX-FileCopyrightText: 2018 Kai Uwe Broulik <kde@broulik.de>
++    SPDX-FileCopyrightText: 2026 OpenMandriva
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#include "touch.h"
++
++#include <QGuiApplication>
++#include <QRect>
++#include <QTransform>
++
++#include <kscreen/config.h>
++#include <kscreen/output.h>
++
++#include <climits>
++#include <memory>
++
++#include <X11/Xlib.h>
++#include <X11/extensions/XInput.h>
++#include <X11/extensions/XInput2.h>
++
++namespace
++{
++struct DeviceListDeleter {
++    void operator()(XDeviceInfo *info) const
++    {
++        if (info) {
++            XFreeDeviceList(info);
++        }
++    }
++};
++
++struct XDeleter {
++    void operator()(void *data) const
++    {
++        if (data) {
++            XFree(data);
++        }
++    }
++};
++
++QRect outputRect(const KScreen::ConfigPtr &config, const KScreen::OutputPtr &output)
++{
++    const QSize size = config->logicalSizeForOutputInt(*output);
++    if (!size.isValid()) {
++        return {};
++    }
++    return QRect(output->pos(), size);
++}
++
++KScreen::OutputPtr touchTarget(const KScreen::ConfigPtr &config)
++{
++    const auto outputs = config->connectedOutputs();
++    KScreen::OutputPtr panel;
++    KScreen::OutputPtr primary;
++    int enabled = 0;
++    for (const auto &output : outputs) {
++        if (!output->isEnabled()) {
++            continue;
++        }
++        ++enabled;
++        if (!primary || output->priority() < primary->priority()) {
++            primary = output;
++        }
++        if (output->type() == KScreen::Output::Panel) {
++            panel = output;
++        }
++    }
++    if (panel) {
++        return panel;
++    }
++    if (enabled == 1) {
++        return primary;
++    }
++    return primary;
++}
++}
++
++void alignX11TouchScreen(const KScreen::ConfigPtr &config)
++{
++    if (!config || !qGuiApp || qGuiApp->platformName() != QLatin1String("xcb")) {
++        return;
++    }
++    auto *x11App = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
++    if (!x11App) {
++        return;
++    }
++    Display *display = x11App->display();
++    if (!display) {
++        return;
++    }
++
++    const KScreen::OutputPtr target = touchTarget(config);
++    if (!target) {
++        return;
++    }
++    const QRect internal = outputRect(config, target);
++    if (internal.isEmpty()) {
++        return;
++    }
++
++    QRect total;
++    const auto outputs = config->connectedOutputs();
++    for (const auto &output : outputs) {
++        if (!output->isEnabled()) {
++            continue;
++        }
++        const QRect rect = outputRect(config, output);
++        if (!rect.isEmpty()) {
++            total = total.united(rect);
++        }
++    }
++    if (total.isEmpty()) {
++        return;
++    }
++
++    int angle = 0;
++    switch (target->rotation()) {
++    case KScreen::Output::Left:
++        angle = 90;
++        break;
++    case KScreen::Output::Right:
++        angle = 270;
++        break;
++    case KScreen::Output::Inverted:
++        angle = 180;
++        break;
++    default:
++        break;
++    }
++
++    QTransform transform;
++    transform = transform.translate(float(internal.x()) / float(total.width()), float(internal.y()) / float(total.height()));
++    transform = transform.scale(float(internal.width()) / float(total.width()), float(internal.height()) / float(total.height()));
++    transform = transform.rotate(angle);
++    switch (angle) {
++    case 90:
++        transform = transform.translate(0, -1);
++        break;
++    case 270:
++        transform = transform.translate(-1, 0);
++        break;
++    case 180:
++        transform = transform.translate(-1, -1);
++        break;
++    default:
++        break;
++    }
++
++    const Atom touchScreenAtom = XInternAtom(display, XI_TOUCHSCREEN, True);
++    const Atom matrixAtom = XInternAtom(display, "Coordinate Transformation Matrix", True);
++    const Atom floatAtom = XInternAtom(display, "FLOAT", True);
++    if (touchScreenAtom == None || matrixAtom == None || floatAtom == None) {
++        return;
++    }
++
++    int nDevices = 0;
++    std::unique_ptr<XDeviceInfo, DeviceListDeleter> deviceInfo(XListInputDevices(display, &nDevices));
++    if (!deviceInfo) {
++        return;
++    }
++
++    for (XDeviceInfo *info = deviceInfo.get(); info < deviceInfo.get() + nDevices; ++info) {
++        if (info->type != touchScreenAtom) {
++            continue;
++        }
++
++        int nProperties = 0;
++        std::unique_ptr<Atom, XDeleter> properties(XIListProperties(display, info->id, &nProperties));
++        bool found = false;
++        for (int i = 0; i < nProperties; ++i) {
++            if (properties.get()[i] == matrixAtom) {
++                found = true;
++                break;
++            }
++        }
++        if (!found) {
++            continue;
++        }
++
++        Atom type = None;
++        int format = 0;
++        unsigned long nItems = 0;
++        unsigned long bytesAfter = 0;
++        unsigned char *dataPtr = nullptr;
++        XIGetProperty(display, info->id, matrixAtom, 0, 1000, False, AnyPropertyType, &type, &format, &nItems, &bytesAfter, &dataPtr);
++        std::unique_ptr<unsigned char, XDeleter> data(dataPtr);
++        if (nItems != 9 || format != int(sizeof(float) * CHAR_BIT) || type != floatAtom || !dataPtr) {
++            continue;
++        }
++
++        auto *values = reinterpret_cast<float *>(dataPtr);
++        values[0] = transform.m11();
++        values[1] = transform.m21();
++        values[2] = transform.m31();
++        values[3] = transform.m12();
++        values[4] = transform.m22();
++        values[5] = transform.m32();
++        values[6] = transform.m13();
++        values[7] = transform.m23();
++        values[8] = transform.m33();
++        XIChangeProperty(display, info->id, matrixAtom, type, format, PropModeReplace, dataPtr, int(nItems));
++        XFlush(display);
++        // The internal panel has one touchscreen. An external-only desktop
++        // uses the same single-device assumption as the old KDED module.
++        break;
++    }
++}
+diff -ruN a/x11hotplug/touch.h b/x11hotplug/touch.h
+--- a/x11hotplug/touch.h	1970-01-01 01:00:00.000000000 +0100
++++ b/x11hotplug/touch.h	2026-10-19 21:31:46.325510561 +0200
+@@ -0,0 +1,14 @@
++/*
++    SPDX-FileCopyrightText: 2018 Kai Uwe Broulik <kde@broulik.de>
++    SPDX-FileCopyrightText: 2026 OpenMandriva
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include <kscreen/types.h>
++
++// Map the touchscreen's coordinate transformation matrix onto the internal
++// panel, or onto the only enabled output when there is no panel. No-op when
++// the process is not on X11.
++void alignX11TouchScreen(const KScreen::ConfigPtr &config);

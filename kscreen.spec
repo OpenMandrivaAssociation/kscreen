@@ -6,7 +6,7 @@
 Summary:	KDE Display Management software
 Name:		kscreen
 Version:	6.8.0
-Release:	%{?git:0.%{git}.}1
+Release:	%{?git:0.%{git}.}2
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
@@ -15,6 +15,9 @@ Source0:	https://invent.kde.org/plasma/kscreen/-/archive/%{gitbranch}/kscreen-%{
 %else
 Source0:	http://download.kde.org/%{stable}/plasma/%(echo %{version} |cut -d. -f1-3)/kscreen-%{version}.tar.xz
 %endif
+# kwin_x11 does not apply saved layouts. This helper does that for the X11
+# session only and exits immediately on any other platform.
+Patch0:		kscreen-6.8.0-x11-hotplug.patch
 BuildRequires:	cmake(KF6Declarative)
 BuildRequires:	cmake(KF6IconThemes)
 BuildRequires:	cmake(Plasma) >= 5.90.0
@@ -45,6 +48,7 @@ BuildRequires:	cmake(Qt6WaylandClient)
 BuildRequires:	pkgconfig(wayland-protocols)
 BuildRequires:	pkgconfig(wayland-scanner)
 BuildRequires:	pkgconfig(xcb-atom)
+BuildRequires:	pkgconfig(x11)
 BuildRequires:	pkgconfig(xi)
 BuildRequires:	pkgconfig(xkbcommon)
 BuildRequires:	cmake(ECM)
@@ -57,7 +61,11 @@ BuildOption:	-DKDE_INSTALL_USE_QT_SYS_PATHS:BOOL=ON
 %rename plasma6-kscreen
 
 %description
-KCM and KDED modules for managing displays in KDE.
+KCM and an X11 session helper for managing displays in KDE.
+
+%install -a
+install -d %{buildroot}%{_prefix}/lib/systemd/user/plasma-workspace-x11.target.wants
+ln -s ../plasma-kscreen-x11.service %{buildroot}%{_prefix}/lib/systemd/user/plasma-workspace-x11.target.wants/plasma-kscreen-x11.service
 
 %files -f %{name}.lang
 %{_bindir}/kscreen-console
@@ -66,7 +74,10 @@ KCM and KDED modules for managing displays in KDE.
 %{_datadir}/zsh/site-functions/_kscreenctl
 %{_datadir}/qlogging-categories6/kscreen.categories
 %{_prefix}/lib/systemd/user/plasma-kscreen-osd.service
+%{_prefix}/lib/systemd/user/plasma-kscreen-x11.service
+%{_prefix}/lib/systemd/user/plasma-workspace-x11.target.wants/plasma-kscreen-x11.service
 %{_libdir}/libexec/kscreen_osd_service
+%{_libdir}/libexec/kscreen_x11_hotplug
 %{_qtdir}/plugins/plasma/kcms/systemsettings/kcm_kscreen.so
 %{_datadir}/applications/kcm_kscreen.desktop
 %{_datadir}/dbus-1/services/org.kde.kscreen.osdService.service
