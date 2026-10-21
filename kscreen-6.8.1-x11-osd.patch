@@ -1,0 +1,43 @@
+diff -ruN a/osd/osd.cpp b/osd/osd.cpp
+--- a/osd/osd.cpp	2026-10-21 23:36:15.671529031 +0200
++++ b/osd/osd.cpp	2026-10-21 23:36:15.689496420 +0200
+@@ -12,6 +12,7 @@
+ #include <LayerShellQt/Window>
+ 
+ #include <KWindowSystem>
++#include <KX11Extras>
+ 
+ #include <Plasma/Plasma>
+ 
+@@ -66,13 +67,24 @@
+         QMetaObject::invokeMethod(m_osdActionSelector->rootObject(), "moveRight");
+     }
+ 
+-    auto layerWindow = LayerShellQt::Window::get(m_osdActionSelector.get());
+-    layerWindow->setScope(QStringLiteral("on-screen-display"));
+-    layerWindow->setLayer(LayerShellQt::Window::LayerOverlay);
+-    layerWindow->setAnchors({});
+-    layerWindow->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityOnDemand);
+-    m_osdActionSelector->setScreen(screen);
+-    m_osdActionSelector->setVisible(true);
++    if (KWindowSystem::isPlatformWayland()) {
++        auto layerWindow = LayerShellQt::Window::get(m_osdActionSelector.get());
++        layerWindow->setScope(QStringLiteral("on-screen-display"));
++        layerWindow->setLayer(LayerShellQt::Window::LayerOverlay);
++        layerWindow->setAnchors({});
++        layerWindow->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityOnDemand);
++        m_osdActionSelector->setScreen(screen);
++        m_osdActionSelector->setVisible(true);
++    } else if (KWindowSystem::isPlatformX11()) {
++        auto newGeometry = m_osdActionSelector->geometry();
++        newGeometry.moveCenter(screen->geometry().center());
++        KX11Extras::setState(m_osdActionSelector->winId(), NET::SkipPager | NET::SkipSwitcher | NET::SkipTaskbar);
++        KX11Extras::setType(m_osdActionSelector->winId(), NET::OnScreenDisplay);
++        m_osdActionSelector->setVisible(true);
++        // KWin moves an OSD that is positioned before it is shown.
++        m_osdActionSelector->setGeometry(newGeometry);
++        m_osdActionSelector->requestActivate();
++    }
+ }
+ 
+ void Osd::onOsdActionSelected(int action)

@@ -6,7 +6,7 @@
 Summary:	KDE Display Management software
 Name:		kscreen
 Version:	6.8.1
-Release:	%{?git:0.%{git}.}1
+Release:	%{?git:0.%{git}.}2
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
@@ -18,6 +18,9 @@ Source0:	http://download.kde.org/%{stable}/plasma/%(echo %{version} |cut -d. -f1
 # kwin_x11 does not apply saved layouts. This helper does that for the X11
 # session only and exits immediately on any other platform.
 Patch0:		kscreen-6.8.0-x11-hotplug.patch
+# Center the output OSD on X11 and mark it NET::OnScreenDisplay.
+# Wayland still uses the layer-shell overlay.
+Patch1:		kscreen-6.8.1-x11-osd.patch
 BuildRequires:	cmake(KF6Declarative)
 BuildRequires:	cmake(KF6IconThemes)
 BuildRequires:	cmake(Plasma) >= 5.90.0
