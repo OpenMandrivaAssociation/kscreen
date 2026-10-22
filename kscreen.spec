@@ -6,7 +6,7 @@
 Summary:	KDE Display Management software
 Name:		kscreen
 Version:	6.8.1
-Release:	%{?git:0.%{git}.}2
+Release:	%{?git:0.%{git}.}3
 License:	GPLv2+
 Group:		Graphical desktop/KDE
 Url:		https://projects.kde.org/projects/playground/libs/kscreen
@@ -21,6 +21,10 @@ Patch0:		kscreen-6.8.0-x11-hotplug.patch
 # Center the output OSD on X11 and mark it NET::OnScreenDisplay.
 # Wayland still uses the layer-shell overlay.
 Patch1:		kscreen-6.8.1-x11-osd.patch
+# X11 scale is one global factor (QT_SCREEN_SCALE_FACTORS + Xft.dpi).
+# 6.8's per-output slider applied an xrandr transform and did not save.
+# Wayland still scales each output.
+Patch2:		kscreen-6.8.1-x11-scale.patch
 BuildRequires:	cmake(KF6Declarative)
 BuildRequires:	cmake(KF6IconThemes)
 BuildRequires:	cmake(Plasma) >= 5.90.0
